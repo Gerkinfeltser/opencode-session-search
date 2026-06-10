@@ -22,6 +22,43 @@ pub fn db_path() -> Result<PathBuf, String> {
     }
 }
 
+/// The opencode project a session belongs to: its ID and every directory
+/// known to be a checkout of it (main worktree plus `project_directory` rows
+/// for roots and git worktrees).
+pub struct SessionProject {
+    pub id: String,
+    pub directories: Vec<String>,
+}
+
+/// Look up the project of a session.
+pub fn session_project(
+    db_override: Option<&Path>,
+    session_id: &str,
+) -> Result<SessionProject, String> {
+    let path = resolve_path(db_override)?;
+    let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("Failed to open database: {e}"))?;
+
+    let (id, worktree): (String, String) = conn
+        .query_row(
+            "SELECT p.id, p.worktree FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ?1",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("Project lookup failed: {e}"))?;
+
+    // Older databases may not have the project_directory table.
+    let mut directories = vec![worktree];
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT directory FROM project_directory WHERE project_id = ?1")
+        && let Ok(rows) = stmt.query_map([&id], |row| row.get::<_, String>(0))
+    {
+        directories.extend(rows.flatten());
+    }
+
+    Ok(SessionProject { id, directories })
+}
+
 /// Messages sent from the background loading thread.
 pub enum LoadMsg {
     /// Phase 1: a batch of sessions (metadata only, no last_input yet).

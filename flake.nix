@@ -24,7 +24,7 @@
 
           src = ./.;
 
-          cargoHash = "sha256-UiNoBocG21BjAb9326PUr/QDaFbn32KzjdAQHQu3mr4=";
+          cargoHash = "sha256-qY4lV3gZGM2SN19/+kw3xTqd8Vb270NsNUMgQrIbFZA=";
 
           meta = with pkgs.lib; {
             description = "Search and resume OpenCode sessions across folders";

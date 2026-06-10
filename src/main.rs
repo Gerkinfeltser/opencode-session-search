@@ -1,21 +1,22 @@
 mod app;
 mod db;
 mod fuzzy;
+mod import;
 mod ui;
 
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::prelude::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::prelude::CrosstermBackend;
 
 use app::{App, AppResult};
 
@@ -37,8 +38,9 @@ fn main() {
 
     // Set up channel and spawn background loader
     let (tx, rx) = mpsc::channel();
+    let loader_db_override = db_override.clone();
     std::thread::spawn(move || {
-        db::stream_sessions(db_override, tx);
+        db::stream_sessions(loader_db_override, tx);
     });
 
     let mut app = App::new(rx);
@@ -98,13 +100,57 @@ fn main() {
     disable_raw_mode().expect("failed to disable raw mode");
     crossterm::execute!(io::stdout(), LeaveAlternateScreen).expect("failed to leave alt screen");
 
-    // Act on result
-    match app.result {
-        Some(AppResult::Selected(session)) => {
+    // Act on result. If the selected session belongs to the project of the
+    // current directory, resume it directly. Otherwise opencode would resume
+    // it in its original directory, so copy it here (export-then-import)
+    // and open the copy instead.
+    if let Some(AppResult::Selected(session)) = app.result {
+        if same_project(db_override.as_deref(), &session.id) {
             let err = Command::new("opencode").arg("-s").arg(&session.id).exec();
             eprintln!("Failed to exec opencode: {err}");
             std::process::exit(1);
         }
-        _ => {}
+        let cwd = std::env::current_dir()
+            .map(|d| d.display().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        eprintln!("Importing session {} into {cwd} ...", session.id);
+        match import::import_session(&session.id) {
+            Ok(new_id) => {
+                let err = Command::new("opencode").arg("-s").arg(&new_id).exec();
+                eprintln!("Failed to exec opencode: {err}");
+                std::process::exit(1);
+            }
+            Err(err) => {
+                eprintln!("Failed to import session: {err}");
+                std::process::exit(1);
+            }
+        }
     }
+}
+
+/// Whether the session belongs to the same opencode project as the current
+/// working directory: the cwd's git toplevel matches one of the project's
+/// known checkout directories, or both are outside any git repo (opencode's
+/// "global" project).
+fn same_project(db_override: Option<&Path>, session_id: &str) -> bool {
+    let toplevel = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string());
+    let Ok(project) = db::session_project(db_override, session_id) else {
+        return false;
+    };
+    match toplevel {
+        Some(toplevel) => {
+            let toplevel = canonical(&toplevel);
+            project.directories.iter().any(|d| canonical(d) == toplevel)
+        }
+        None => project.id == "global",
+    }
+}
+
+fn canonical(path: &str) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path))
 }

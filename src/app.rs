@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use ratatui::widgets::TableState;
 
 use crate::db::{LoadMsg, Session};
-use crate::fuzzy::{filter_sessions, ScoredSession};
+use crate::fuzzy::{ScoredSession, filter_sessions};
 
 /// The result of running the app — either the user selected a session or quit.
 pub enum AppResult {
