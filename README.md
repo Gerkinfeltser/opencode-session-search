@@ -39,6 +39,7 @@ opencode-session-search
 - Up/down arrows to select. Press enter to open the session in Opencode:
   - If the session belongs to the current folder's project it is resumed directly (`opencode -s <session_id>`).
   - Otherwise a copy is made via `opencode export` + `opencode import` and changed to the current dir (since opencode 1.15.12 sessions are pinned to the directory they were created in). The original session is untouched.
+- Pass `--cwd` to always import a copy of the session into the current directory, even if it belongs to the current folder's project (instead of resuming it in place).
 - Tested on Linux only for now.
 
 ![screenshot](https://raw.githubusercontent.com/kasbah/opencode-session-search/main/screenshot.png)

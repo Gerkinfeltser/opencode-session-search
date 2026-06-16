@@ -36,6 +36,11 @@ fn main() {
         None
     };
 
+    // Check for --cwd flag. When set, always import/export the session into the
+    // current working directory instead of resuming it in place — even if the
+    // session already belongs to the current folder's project.
+    let force_cwd = args.iter().any(|a| a == "--cwd");
+
     // Set up channel and spawn background loader
     let (tx, rx) = mpsc::channel();
     let loader_db_override = db_override.clone();
@@ -105,7 +110,7 @@ fn main() {
     // it in its original directory, so copy it here (export-then-import)
     // and open the copy instead.
     if let Some(AppResult::Selected(session)) = app.result {
-        if same_project(db_override.as_deref(), &session.id) {
+        if !force_cwd && same_project(db_override.as_deref(), &session.id) {
             let err = Command::new("opencode").arg("-s").arg(&session.id).exec();
             eprintln!("Failed to exec opencode: {err}");
             std::process::exit(1);
