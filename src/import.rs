@@ -17,7 +17,7 @@
 //! chars. Sessions use descending IDs, messages and parts ascending.
 
 use std::collections::HashMap;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -151,19 +151,31 @@ pub fn rewrite_export(export: &mut Value) -> Result<String, String> {
 /// Copy `session_id` into the current working directory via
 /// `opencode export` + `opencode import`. Returns the new session ID.
 pub fn import_session(session_id: &str) -> Result<String, String> {
+    // opencode truncates stdout to 128 KB when it's a pipe (a Bun bug), so
+    // redirect the export to a temp file and read that back instead of
+    // capturing stdout directly — otherwise large sessions get cut off and
+    // fail to parse as JSON.
+    let export_path = std::env::temp_dir().join(format!("opencode-export-{session_id}.json"));
+    let export_file = std::fs::File::create(&export_path)
+        .map_err(|e| format!("could not create {}: {e}", export_path.display()))?;
     let exported = Command::new("opencode")
         .arg("export")
         .arg(session_id)
+        .stdout(Stdio::from(export_file))
         .output()
         .map_err(|e| format!("failed to run `opencode export`: {e}"))?;
     if !exported.status.success() {
+        let _ = std::fs::remove_file(&export_path);
         return Err(format!(
             "`opencode export {session_id}` failed: {}",
             String::from_utf8_lossy(&exported.stderr).trim()
         ));
     }
 
-    let mut export: Value = serde_json::from_slice(&exported.stdout)
+    let export_bytes = std::fs::read(&export_path)
+        .map_err(|e| format!("could not read {}: {e}", export_path.display()))?;
+    let _ = std::fs::remove_file(&export_path);
+    let mut export: Value = serde_json::from_slice(&export_bytes)
         .map_err(|e| format!("could not parse `opencode export` output: {e}"))?;
     let new_session_id = rewrite_export(&mut export)?;
 
