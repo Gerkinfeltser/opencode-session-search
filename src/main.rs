@@ -11,6 +11,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -20,26 +21,34 @@ use ratatui::prelude::CrosstermBackend;
 
 use app::{App, AppResult};
 
+/// Search and resume OpenCode sessions across folders.
+#[derive(Parser)]
+#[command(name = env!("CARGO_PKG_NAME"), version, about, long_about = None, disable_version_flag = true)]
+struct Cli {
+    /// Always import a copy of the selected session into the current directory,
+    /// even if it belongs to the current folder's project (instead of resuming
+    /// it in place).
+    #[arg(long)]
+    cwd: bool,
+
+    /// Use the SQLite database at <path> instead of the default.
+    #[arg(long, value_name = "path")]
+    db: Option<PathBuf>,
+
+    /// Print version information and exit.
+    #[arg(short = 'v', long, action = clap::ArgAction::Version)]
+    version: (),
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    // Check for --version / -v flag
-    if args.iter().any(|a| a == "--version" || a == "-v") {
-        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-        return;
-    }
+    let db_override = cli.db;
 
-    // Check for --db <path> argument
-    let db_override: Option<PathBuf> = if let Some(pos) = args.iter().position(|a| a == "--db") {
-        args.get(pos + 1).map(|p| PathBuf::from(p))
-    } else {
-        None
-    };
-
-    // Check for --cwd flag. When set, always import/export the session into the
-    // current working directory instead of resuming it in place — even if the
-    // session already belongs to the current folder's project.
-    let force_cwd = args.iter().any(|a| a == "--cwd");
+    // When set, always import/export the session into the current working
+    // directory instead of resuming it in place — even if the session already
+    // belongs to the current folder's project.
+    let force_cwd = cli.cwd;
 
     // Set up channel and spawn background loader
     let (tx, rx) = mpsc::channel();
