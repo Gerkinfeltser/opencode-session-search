@@ -5,7 +5,6 @@ mod import;
 mod ui;
 
 use std::io;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -120,24 +119,33 @@ fn main() {
     // and open the copy instead.
     if let Some(AppResult::Selected(session)) = app.result {
         if !force_cwd && same_project(db_override.as_deref(), &session.id) {
-            let err = Command::new("opencode").arg("-s").arg(&session.id).exec();
-            eprintln!("Failed to exec opencode: {err}");
-            std::process::exit(1);
+            exec_opencode(&session.id);
         }
         let cwd = std::env::current_dir()
             .map(|d| d.display().to_string())
             .unwrap_or_else(|_| ".".to_string());
         eprintln!("Importing session {} into {cwd} ...", session.id);
         match import::import_session(&session.id) {
-            Ok(new_id) => {
-                let err = Command::new("opencode").arg("-s").arg(&new_id).exec();
-                eprintln!("Failed to exec opencode: {err}");
-                std::process::exit(1);
-            }
+            Ok(new_id) => exec_opencode(&new_id),
             Err(err) => {
                 eprintln!("Failed to import session: {err}");
                 std::process::exit(1);
             }
+        }
+    }
+}
+
+/// Launch opencode with the given session id and exit with its exit code.
+/// Cross-platform replacement for the Unix-only `CommandExt::exec()`: runs
+/// opencode as a foreground child (inheriting the terminal) and propagates
+/// its exit status.
+fn exec_opencode(session_id: &str) -> ! {
+    let status = Command::new("opencode").arg("-s").arg(session_id).status();
+    match status {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => {
+            eprintln!("Failed to exec opencode: {err}");
+            std::process::exit(1);
         }
     }
 }
